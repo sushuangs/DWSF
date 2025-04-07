@@ -141,6 +141,7 @@ if __name__ == "__main__":
         oL_psnrs = []
         iH_psnrs = []
         iL_psnrs = []
+        g_psnrs = []
         N_psnrs = []
         with torch.no_grad():
             for data in dataloader:
@@ -175,10 +176,12 @@ if __name__ == "__main__":
                 oH_psnr, oL_psnr, _ , _ = psnr_ssim_acc(output_img.cpu(), output_img_r.cpu(), output_img_n.cpu())
                 iH_psnr, iL_psnr, _ , _ = psnr_ssim_acc(inputs.cpu(), output_img_r.cpu(), output_img_n.cpu())
                 N_psnr, _, _ , _ = psnr_ssim_acc(inputs.cpu(), (noise + inputs).cpu(), output_img_n.cpu())
+                g_psnr, _, _ , _ = psnr_ssim_acc(output_img.cpu(), output_img_g.cpu(), output_img_n.cpu())
                 oH_psnrs.append(oH_psnr)
                 oL_psnrs.append(oL_psnr)
                 iH_psnrs.append(iH_psnr)
                 iL_psnrs.append(iL_psnr)
+                g_psnrs.append(g_psnr)
                 N_psnrs.append(N_psnr)
                 bitwise_avg_err_n_history.append(bitwise_avg_err_n)
                 bitwise_avg_err_r_history.append(bitwise_avg_err_r)
@@ -200,4 +203,5 @@ if __name__ == "__main__":
         print('in sigma {}, L_psnr_wm_to_n {:.4f}'.format(n, np.mean(oL_psnrs)))
         print('in sigma {}, H_psnr_ori_to_r {:.4f}'.format(n, np.mean(iH_psnrs)))
         print('in sigma {}, L_psnr_ori_to_n {:.4f}'.format(n, np.mean(iL_psnrs)))
+        print('in sigma {}, psnr GaussianBlur {:.4f}'.format(n, np.mean(g_psnrs)))
         print('in sigma {}, N_psnr {:.4f}'.format(n, np.mean(N_psnrs)))
