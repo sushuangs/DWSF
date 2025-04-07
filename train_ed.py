@@ -37,7 +37,7 @@ if __name__ == '__main__':
     transform = transforms.Compose([
         transforms.RandomCrop((H, W), pad_if_needed=True, padding_mode='reflect'),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])])
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
 
     # build dataloader
     train_dataset_path = args.train_dataset_path
@@ -48,12 +48,15 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
 
     # Build model...
-    train_noise_layer = ["Combined([Identity(),RandomJpegMask(50,100, padding=True), RandomJpeg(50,100,padding=True), RandomJpegSS(50,100,padding=True), RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1),\
-                                    Identity(),RandomJpegMask(50,100, padding=True), RandomJpeg(50,100,padding=True), RandomJpegSS(50,100,padding=True), RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1), \
-                                        RandomRotate(10), RandomResize(target_size=128), RandomCrop(0.9, 1, target_size=128), RandomPIP(1,1.1, target_size=128)])"]
-    val_noise_layer = ["Combined([Identity(), RandomJpegTest(50,100),  RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1), \
-                                    Identity(), RandomJpegTest(50,100),  RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1), \
-                                    RandomRotate(10), RandomResize(target_size=128), RandomCrop(0.9, 1, target_size=128), RandomPIP(1,1.1, target_size=128)])"]
+    # train_noise_layer = ["Combined([Identity(),RandomJpegMask(50,100, padding=True), RandomJpeg(50,100,padding=True), RandomJpegSS(50,100,padding=True), RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1),\
+    #                                 Identity(),RandomJpegMask(50,100, padding=True), RandomJpeg(50,100,padding=True), RandomJpegSS(50,100,padding=True), RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1), \
+    #                                     RandomRotate(10), RandomResize(target_size=128), RandomCrop(0.9, 1, target_size=128), RandomPIP(1,1.1, target_size=128)])"]
+    # val_noise_layer = ["Combined([Identity(), RandomJpegTest(50,100),  RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1), \
+    #                                 Identity(), RandomJpegTest(50,100),  RandomGN(3,10), RandomGF(3,8), RandomColor(0.5,1.5), RandomDropout(0.7,1), \
+    #                                 RandomRotate(10), RandomResize(target_size=128), RandomCrop(0.9, 1, target_size=128), RandomPIP(1,1.1, target_size=128)])"]
+
+    train_noise_layer = ["Identity()"]
+    val_noise_layer = ["Identity()"]
     encoder_decoder = EncoderDecoder(H=H, W=W, message_length=message_length, noise_layers=train_noise_layer)
     discriminator = Discriminator()
     val_noiser = Noise(val_noise_layer)
@@ -61,20 +64,22 @@ if __name__ == '__main__':
     discriminator.to(device)
     val_noiser.to(device)
 
-    optimizer = torch.optim.Adamw(encoder_decoder.parameters(), lr=1e-4)
-    optimizer_dis = torch.optim.Adamw(discriminator.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(encoder_decoder.parameters(), lr=1e-4)
+    optimizer_dis = torch.optim.AdamW(discriminator.parameters(), lr=1e-4)
 
     mseloss = torch.nn.MSELoss().to(device)
     binaryloss = torch.nn.BCEWithLogitsLoss().to(device)
     ssim_loss = kornia.losses.MS_SSIMLoss(data_range=2, alpha=0.5).to(device)
 
-    min_loss = 1000000
+    min_loss = -1000000
     dis_weight = 1e-3
     encode_weight = 0.2
     decode_weight = 1
     best_epoch = 0
     label_cover = torch.full((batch_size, 1), 1, dtype=torch.float, device=device)
     label_encoded = torch.full((batch_size, 1), 0, dtype=torch.float, device=device)
+
+    counter = 0
     for epoch in range(100):
         start = time.time()
         train_en_loss_tmp = 0
@@ -88,7 +93,7 @@ if __name__ == '__main__':
         discriminator.train()
         print("========training=============")
         for batch_idx, batch_data in enumerate(train_loader):
-            images = batch_data
+            images = batch_data[0]
             images = images.to(device)
             ori_images = images.clone().detach()
 
@@ -177,7 +182,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             for batch_idx_val, batch_data_val in enumerate(val_loader):
                 val_count += 1
-                images = batch_data_val
+                images = batch_data_val[0]
                 images = images.to(device)
                 ori_images = images.clone().detach()
 
@@ -244,17 +249,24 @@ if __name__ == '__main__':
             torch.save(encoder_decoder.encoder.state_dict(), save_pth_path + '/encoder_{}.pth'.format(epoch))
             torch.save(encoder_decoder.decoder.state_dict(), save_pth_path + '/decoder_{}.pth'.format(epoch))
             torch.save(discriminator.state_dict(), save_pth_path + '/discriminator_{}.pth'.format(epoch))
+            psnr_mean = psnr_all / val_count
 
         # save best model
-        if val_loss_tmp < min_loss:
-            min_loss = val_loss_tmp
-            torch.save(encoder_decoder.encoder.state_dict(), save_pth_path + '/encoder_best.pth')
-            torch.save(encoder_decoder.decoder.state_dict(), save_pth_path + '/decoder_best.pth')
-            torch.save(discriminator.state_dict(), save_pth_path + '/discriminator_best.pth')
+        if psnr_mean > min_loss:
+            min_loss = psnr_mean
+            torch.save(encoder_decoder.encoder.state_dict(), save_pth_path + f'/encoder_best_psnr-{psnr_mean}.pth')
+            torch.save(encoder_decoder.decoder.state_dict(), save_pth_path + f'/decoder_best_psnr-{psnr_mean}.pth')
+            torch.save(discriminator.state_dict(), save_pth_path + f'/discriminator_best_psnr-{psnr_mean}.pth')
             best_epoch = epoch
+            counter = 0
             print('save on epoch-{}'.format(epoch))
 
         end = time.time()
-        print('Time(epoch-{}):{}'.format(epoch, end - start))
+        print('Time(epoch-{}):{} counter:{}'.format(epoch, end - start, counter))
+
+        counter += 1
+        if counter >= 10:
+            print("early_stop")
+            break
 
 
