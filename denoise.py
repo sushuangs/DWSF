@@ -15,35 +15,31 @@ from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
+##################
 from networks.models.Encoder import Encoder
 from networks.models.Decoder import Decoder
 from networks.models.network_scunet import SCUNet
+##################
 
-
-def psnr_ssim_acc(image, H_img, L_img):
+def psnr_ssim_acc(image, H_img):
     # psnr
     H_psnr = kornia.metrics.psnr(
         ((image + 1) / 2).clamp(0, 1),
         ((H_img.detach() + 1) / 2).clamp(0, 1),
         1,
     )
-    L_psnr = kornia.metrics.psnr(
-        ((image + 1) / 2).clamp(0, 1),
-        ((L_img.detach() + 1) / 2).clamp(0, 1),
-        1,
-    )
     # ssim
-    H_ssim = kornia.metrics.ssim(
-        ((image + 1) / 2).clamp(0, 1),
-        ((H_img.detach() + 1) / 2).clamp(0, 1),
-        window_size=11,
-    ).mean()
-    L_ssim = kornia.metrics.ssim(
-        ((image + 1) / 2).clamp(0, 1),
-        ((L_img.detach() + 1) / 2).clamp(0, 1),
-        window_size=11,
-    ).mean()
-    return H_psnr, L_psnr, H_ssim, L_ssim
+    # H_ssim = kornia.metrics.ssim(
+    #     ((image + 1) / 2).clamp(0, 1),
+    #     ((H_img.detach() + 1) / 2).clamp(0, 1),
+    #     window_size=11,
+    # ).mean()
+    # L_ssim = kornia.metrics.ssim(
+    #     ((image + 1) / 2).clamp(0, 1),
+    #     ((L_img.detach() + 1) / 2).clamp(0, 1),
+    #     window_size=11,
+    # ).mean()
+    return H_psnr #, L_psnr , H_ssim, L_ssim
 
 
 class ImageProcessingDataset(Dataset):
@@ -93,14 +89,13 @@ class ImageProcessingDataset(Dataset):
 
 if __name__ == "__main__":
 
-    input_root = "/data/experiment/data/gtos128_all/val"
+    input_root = "/data/experiment/model/DWSF/DWSF_40_gtos/val"
     batch_size = 32
     num_workers = 4
 
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    '''
-    model
-    '''
+
+#######################################
     encoder = Encoder(H=128, W=128, message_length=30)
     decoder = Decoder(message_length=30)
     e_checkpoint = torch.load('/data/experiment/model/DWSF/runs/gtos_I_psnr/pth/encoder_best_psnr-40.716888427734375.pth')
@@ -111,9 +106,7 @@ if __name__ == "__main__":
     decoder.to(device)
     encoder.eval()
     decoder.eval()
-    '''
-    model
-    '''
+#######################################
 
     scunet = SCUNet(in_nc=3,config=[4,4,4,4,4,4,4],dim=64)
 
@@ -137,11 +130,9 @@ if __name__ == "__main__":
         bitwise_avg_err_n_history = []
         bitwise_avg_err_r_history = []
         bitwise_avg_err_g_history = []
-        oH_psnrs = []
-        oL_psnrs = []
-        iH_psnrs = []
-        iL_psnrs = []
-        g_psnrs = []
+        SCUNet_H_psnrs = []
+        GaussianBlur_H_psnrs = []
+        L_psnrs = []
         N_psnrs = []
         with torch.no_grad():
             for data in dataloader:
@@ -152,7 +143,7 @@ if __name__ == "__main__":
                 inputs = inputs.to(device)
 
                 message = message.to(device)
-
+#####################
                 output_img = encoder(inputs, message)
                 output_img_n = output_img + noise
                 output_img_g = gaussian_blur(output_img_n)
@@ -161,7 +152,7 @@ if __name__ == "__main__":
                 decoded_messages_n = decoder(output_img_n)
                 decoded_messages_r = decoder(output_img_r)
                 decoded_messages_g = decoder(output_img_g)
-                
+####################                
                 decoded_rounded_n = decoded_messages_n.detach().cpu().numpy().round().clip(0, 1)
                 bitwise_avg_err_n = np.sum(np.abs(decoded_rounded_n - message.detach().cpu().numpy())) / (
                         batch_size * 30)
@@ -173,35 +164,38 @@ if __name__ == "__main__":
                 decoded_rounded_g = decoded_messages_g.detach().cpu().numpy().round().clip(0, 1)
                 bitwise_avg_err_g = np.sum(np.abs(decoded_rounded_g - message.detach().cpu().numpy())) / (
                         batch_size * 30)
-                oH_psnr, oL_psnr, _ , _ = psnr_ssim_acc(output_img.cpu(), output_img_r.cpu(), output_img_n.cpu())
-                iH_psnr, iL_psnr, _ , _ = psnr_ssim_acc(inputs.cpu(), output_img_r.cpu(), output_img_n.cpu())
-                N_psnr, _, _ , _ = psnr_ssim_acc(inputs.cpu(), (noise + inputs).cpu(), output_img_n.cpu())
-                g_psnr, _, _ , _ = psnr_ssim_acc(output_img.cpu(), output_img_g.cpu(), output_img_n.cpu())
-                oH_psnrs.append(oH_psnr)
-                oL_psnrs.append(oL_psnr)
-                iH_psnrs.append(iH_psnr)
-                iL_psnrs.append(iL_psnr)
-                g_psnrs.append(g_psnr)
+                SCUNet_H_psnr = psnr_ssim_acc(output_img.cpu(), output_img_r.cpu())
+                GaussianBlur_H_psnr = psnr_ssim_acc(output_img.cpu(), output_img_g.cpu())
+                L_psnr = psnr_ssim_acc(output_img.cpu(), output_img_n.cpu())
+                N_psnr = psnr_ssim_acc(inputs.cpu(), (noise + inputs).cpu())
+
+                SCUNet_H_psnrs.append(SCUNet_H_psnr)
+                GaussianBlur_H_psnrs.append(GaussianBlur_H_psnr)
+                L_psnrs.append(L_psnr)
                 N_psnrs.append(N_psnr)
                 bitwise_avg_err_n_history.append(bitwise_avg_err_n)
                 bitwise_avg_err_r_history.append(bitwise_avg_err_r)
                 bitwise_avg_err_g_history.append(bitwise_avg_err_g)
         noise = 1 - np.mean(bitwise_avg_err_n_history)
-        recover = 1 - np.mean(bitwise_avg_err_r_history)
-        blur = 1 - np.mean(bitwise_avg_err_g_history)
+        SCUNet_recover = 1 - np.mean(bitwise_avg_err_r_history)
+        GaussianBlur_recover = 1 - np.mean(bitwise_avg_err_g_history)
+        print('-'*60)
         if n == 0:
             clean = 1 - np.mean(bitwise_avg_err_n_history)
         else:
-            revover_rate = (recover - noise) / (clean - noise)
-            print('in sigma {}, recovery rate {:.4f}'.format(n, revover_rate * 100))
-        imporve_rate = (recover - noise) / noise
-        print('in sigma {}, increase rate {:.4f}'.format(n, imporve_rate * 100))
-        print('in sigma {}, nosie image accuracy {:.4f}'.format(n, noise * 100))
-        print('in sigma {}, blur image accuracy {:.4f}'.format(n, blur * 100))
-        print('in sigma {}, recover image accuracy {:.4f}'.format(n, recover * 100))
-        print('in sigma {}, H_psnr_wm_to_r {:.4f}'.format(n, np.mean(oH_psnrs)))
-        print('in sigma {}, L_psnr_wm_to_n {:.4f}'.format(n, np.mean(oL_psnrs)))
-        print('in sigma {}, H_psnr_ori_to_r {:.4f}'.format(n, np.mean(iH_psnrs)))
-        print('in sigma {}, L_psnr_ori_to_n {:.4f}'.format(n, np.mean(iL_psnrs)))
-        print('in sigma {}, psnr GaussianBlur {:.4f}'.format(n, np.mean(g_psnrs)))
-        print('in sigma {}, N_psnr {:.4f}'.format(n, np.mean(N_psnrs)))
+            SCUNet_revover_rate = (SCUNet_recover - noise) / (clean - noise)
+            GaussianBlur_recover_rate =  (GaussianBlur_recover - noise) / (clean - noise)
+            print('恢复率')
+            print('in sigma {}, GaussianBlur recovery rate          {:.4f}'.format(n, SCUNet_revover_rate * 100))
+            print('in sigma {}, SCUNet recovery rate                {:.4f}'.format(n, GaussianBlur_recover_rate * 100))
+        print('准确率')
+        print('in sigma {}, nosie image accuracy                {:.4f}'.format(n, noise * 100))
+        print('in sigma {}, GaussianBlur recover image accuracy {:.4f}'.format(n, GaussianBlur_recover * 100))
+        print('in sigma {}, SCUNet recover image accuracy       {:.4f}'.format(n, SCUNet_recover * 100))
+        print('psnr')
+        print('in sigma {}, SCUNet psnr_wm_to_r                 {:.4f}'.format(n, np.mean(SCUNet_H_psnrs)))
+        print('in sigma {}, GaussianBlur psnr_wm_to_r           {:.4f}'.format(n, np.mean(GaussianBlur_H_psnrs)))
+        print('in sigma {}, L_psnr_wm_to_n                      {:.4f}'.format(n, np.mean(L_psnrs)))
+        print('in sigma {}, N_psnr                              {:.4f}'.format(n, np.mean(N_psnrs)))
+        print('in sigma {}, clean                               {:.4f}'.format(n, clean))
+        print('-'*60)

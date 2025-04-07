@@ -95,8 +95,8 @@ def batch_process(model, dataloader, output_root, device):
             pbar.update(1)
 
 if __name__ == "__main__":
-    input_root = "/data/experiment/data/gtos128_all/val" # val
-    output_root = "./DWSF_40_gtos/val" # val
+    input_root = "/data/experiment/data/gtos128_all/train" # val
+    output_root = "./DWSF_40_gtos/train" # val
     batch_size = 32
     num_workers = 4
 
